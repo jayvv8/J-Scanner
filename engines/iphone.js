@@ -3,124 +3,132 @@
 ========================================
  J-SCANNER
  IPHONE DIAGNOSTIC ENGINE
- Version 1.2
- EVIDENCE-BASED SCANNER
+ VERSION 1.3
+ BINARY FILTER + FALSE POSITIVE CONTROL
 ========================================
 */
 
 (function () {
   "use strict";
 
-  // ======================================
-  // LIMITES DE SEGURIDAD
-  // ======================================
-
-  const MAX_FILE_SIZE = 2 * 1024 * 1024;
-  const MAX_TOTAL_TEXT_SIZE = 80 * 1024 * 1024;
   const MAX_DECOMPRESSED_SIZE = 2 * 1024 * 1024 * 1024;
   const MAX_ORIGINAL_SIZE = 1024 * 1024 * 1024;
+  const MAX_TEXT_FILE_SIZE = 2 * 1024 * 1024;
+  const MAX_TOTAL_TEXT_SIZE = 80 * 1024 * 1024;
   const MAX_ENTRIES = 50000;
   const MAX_INSPECTED_FILES = 10000;
   const MAX_EVIDENCE_PER_RULE = 4;
 
   const TEXT_EXTENSIONS = [
-    ".txt", ".log", ".plist", ".json",
-    ".xml", ".ips", ".crash", ".panic", ".csv"
+    ".txt",
+    ".log",
+    ".plist",
+    ".json",
+    ".xml",
+    ".ips",
+    ".crash",
+    ".panic",
+    ".csv"
+  ];
+
+  // ======================================
+  // RUTAS LEGITIMAS QUE NO SON INDICADORES
+  // ======================================
+
+  const SAFE_PATHS = [
+    "/System/Library/PreferenceBundles/",
+    "/System/Library/Frameworks/",
+    "/System/Library/PrivateFrameworks/",
+    "/System/Library/LaunchDaemons/",
+    "/System/Library/LaunchAgents/",
+    "/System/Applications/",
+    "/usr/lib/system/",
+    "/usr/lib/dyld"
   ];
 
   // ======================================
   // REGLAS DE DETECCION
-  // No se consideran pruebas de trampas.
   // ======================================
 
   const RULES = [
     {
       id: "frida_artifact",
-      name: "Artefacto de Frida",
+      name: "Artefacto específico de Frida",
       category: "Instrumentación",
       severity: "high",
       confidence: "Indicador fuerte",
+
       explanation:
-        "Se encontró una referencia específica a un componente de Frida. Debe comprobarse si corresponde a una herramienta activa o a un registro histórico.",
-      pattern:
-        /\bfrida(?:-server|-gadget|-agent)?\b/i,
+        "Se encontró una referencia específica a un componente de Frida. Debe verificarse si corresponde a una herramienta activa, un registro histórico o una referencia de diagnóstico.",
+
       validate: function (line) {
-        return /\b(frida-server|frida-gadget|frida-agent)\b/i.test(line) ||
-          (/\bfrida\b/i.test(line) &&
-           /\b(27042|27043|gadget|server|agent|attach|spawn)\b/i.test(line));
+        return /\bfrida-(?:server|gadget|agent)\b/i.test(line) ||
+          (
+            /\bfrida\b/i.test(line) &&
+            /\b(?:27042|27043|gadget|server|agent|attach|spawn)\b/i.test(line)
+          );
       }
     },
+
     {
       id: "dyld_injection",
       name: "Variable de carga dinámica",
       category: "Carga de bibliotecas",
       severity: "high",
       confidence: "Indicador fuerte",
+
       explanation:
-        "Se encontró una asignación de DYLD_INSERT_LIBRARIES con una ruta. La referencia por sí sola no demuestra que una biblioteca haya sido cargada.",
-      pattern:
-        /\bDYLD_INSERT_LIBRARIES\b/i,
+        "Se encontró una asignación de DYLD_INSERT_LIBRARIES con una ruta. La presencia de esta variable no demuestra por sí sola que una biblioteca haya sido cargada.",
+
       validate: function (line) {
         return /DYLD_INSERT_LIBRARIES\s*=\s*["']?\/[^;\s"']+/i.test(line);
       }
     },
+
     {
       id: "jailbreak_paths",
       name: "Ruta asociada a jailbreak",
       category: "Sistema",
       severity: "medium",
       confidence: "Indicador contextual",
+
       explanation:
-        "Se encontró una ruta habitualmente asociada a entornos modificados de iOS. Hay que verificar si está activa y a qué proceso pertenece.",
-      pattern:
-        /\/(?:Applications\/Cydia\.app|Library\/MobileSubstrate|var\/jb|usr\/lib\/TweakInject|Library\/PreferenceBundles)/i,
+        "Se encontró una ruta específica habitualmente asociada a herramientas de modificación de iOS. Debe verificarse su existencia, actividad y relación con el proceso.",
+
       validate: function (line) {
-        return /\/(?:Applications\/Cydia\.app|Library\/MobileSubstrate|var\/jb|usr\/lib\/TweakInject|Library\/PreferenceBundles)/i.test(line);
+        return /\/(?:Applications\/(?:Cydia|Sileo|Zebra)\.app|Library\/MobileSubstrate(?:\/|$)|Library\/TweakInject(?:\/|$)|usr\/lib\/TweakInject(?:\/|$)|var\/jb(?:\/|$)|var\/containers\/Bundle\/tweaksupport(?:\/|$))/i.test(line);
       }
     },
+
     {
       id: "injection_framework",
       name: "Framework de modificación",
       category: "Bibliotecas",
       severity: "medium",
       confidence: "Indicador contextual",
+
       explanation:
-        "Se encontró una referencia a un framework utilizado para modificar o instrumentar procesos. Puede aparecer en registros sin que exista una modificación activa.",
-      pattern:
-        /\b(?:MobileSubstrate|Substrate|Substitute|ElleKit|libhooker)\b/i,
+        "Se encontró una referencia a un framework relacionado con instrumentación o modificación de procesos, acompañada de un contexto de carga.",
+
       validate: function (line) {
-        return /\b(?:MobileSubstrate|Substrate|Substitute|ElleKit|libhooker)\b/i.test(line) &&
-          /\b(load|loaded|loading|injected|injection|dylib|library|image|process|mapped)\b/i.test(line);
+        return /\b(?:MobileSubstrate|Substitute|ElleKit|libhooker)\b/i.test(line) &&
+          /\b(?:loaded|loading|injected|injection|dylib|mapped|process)\b/i.test(line);
       }
     },
+
     {
       id: "signature_failure",
-      name: "Error de firma de código",
-      category: "Integridad de aplicaciones",
+      name: "Error de validación de firma",
+      category: "Integridad",
       severity: "medium",
       confidence: "Indicador contextual",
+
       explanation:
-        "Se encontró un mensaje relacionado con una firma de código inválida. Puede deberse a errores legítimos de instalación, desarrollo o actualización.",
-      pattern:
-        /(?:code signature invalid|invalid code signature|signature validation failed)/i,
+        "Se encontró un error relacionado con la validación de una firma de código. También puede deberse a errores legítimos de instalación, desarrollo o actualización.",
+
       validate: function (line) {
         return /(?:code signature invalid|invalid code signature|signature validation failed)/i.test(line) &&
-          /\b(amfi|codesign|executable|process|bundle|application)\b/i.test(line);
-      }
-    },
-    {
-      id: "modified_executable",
-      name: "Ejecutable posiblemente modificado",
-      category: "Integridad de aplicaciones",
-      severity: "medium",
-      confidence: "Indicador contextual",
-      explanation:
-        "Se encontró una referencia a un ejecutable sin firma válida. Es necesario identificar la aplicación y comprobar el origen del registro.",
-      pattern:
-        /\bunsigned executable\b/i,
-      validate: function (line) {
-        return /\bunsigned executable\b/i.test(line) &&
-          /\b(path|process|bundle|application|amfi|executable)\b/i.test(line);
+          /\b(?:amfi|codesign|executable|process|bundle|application)\b/i.test(line);
       }
     }
   ];
@@ -128,17 +136,6 @@
   // ======================================
   // UTILIDADES
   // ======================================
-
-  function isTextFile(name) {
-    const lower = String(name).toLowerCase();
-
-    return TEXT_EXTENSIONS.some(function (ext) {
-      return lower.endsWith(ext);
-    }) ||
-      lower.includes("log") ||
-      lower.includes("panic") ||
-      lower.includes("crash");
-  }
 
   function cleanPath(path) {
     return String(path)
@@ -150,35 +147,100 @@
   function cleanEvidence(line) {
     return String(line)
       .replace(/\0/g, "")
+      .replace(/[^\x09\x0A\x0D\x20-\x7E\u00A0-\uFFFF]/g, "")
       .replace(/\s+/g, " ")
       .trim()
       .slice(0, 350);
   }
 
+  function isSafePath(path) {
+    const normalized = "/" + cleanPath(path).replace(/^\/+/, "");
+
+    return SAFE_PATHS.some(function (safePath) {
+      return normalized.startsWith(safePath);
+    });
+  }
+
+  function hasTextExtension(path) {
+    const name = cleanPath(path).toLowerCase();
+    const basename = name.split("/").pop();
+
+    return TEXT_EXTENSIONS.some(function (extension) {
+      return basename.endsWith(extension);
+    });
+  }
+
   // ======================================
-  // ANALISIS CONTEXTUAL
+  // FILTRO DE CONTENIDO BINARIO
+  // ======================================
+
+  function isProbablyText(bytes) {
+    if (!bytes || bytes.length === 0) {
+      return false;
+    }
+
+    // Los archivos binarios de Apple pueden comenzar
+    // con bplist00 aunque su extensión sea .plist.
+    if (
+      bytes.length >= 8 &&
+      bytes[0] === 0x62 &&
+      bytes[1] === 0x70 &&
+      bytes[2] === 0x6c &&
+      bytes[3] === 0x69 &&
+      bytes[4] === 0x73 &&
+      bytes[5] === 0x74
+    ) {
+      return false;
+    }
+
+    let printable = 0;
+    let inspected = Math.min(bytes.length, 8192);
+
+    for (let i = 0; i < inspected; i++) {
+      const value = bytes[i];
+
+      if (value === 0) {
+        return false;
+      }
+
+      if (
+        value === 9 ||
+        value === 10 ||
+        value === 13 ||
+        (value >= 32 && value <= 126) ||
+        value >= 160
+      ) {
+        printable++;
+      }
+    }
+
+    return printable / inspected >= 0.85;
+  }
+
+  // ======================================
+  // ANALISIS DE TEXTO
   // ======================================
 
   function analyzeText(text, filePath) {
     const findings = [];
     const lines = String(text).split(/\r?\n/);
 
+    if (isSafePath(filePath)) {
+      return findings;
+    }
+
     for (const rule of RULES) {
       const evidence = [];
       const seen = new Set();
 
       for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
+        const originalLine = lines[i];
 
-        if (!rule.pattern.test(line)) {
+        if (!rule.validate(originalLine)) {
           continue;
         }
 
-        if (!rule.validate(line)) {
-          continue;
-        }
-
-        const excerpt = cleanEvidence(line);
+        const excerpt = cleanEvidence(originalLine);
 
         if (!excerpt || seen.has(excerpt)) {
           continue;
@@ -238,8 +300,7 @@
           break;
         }
 
-        const chunk = result.value;
-        this.totalRead += chunk.byteLength;
+        this.totalRead += result.value.byteLength;
 
         if (this.totalRead > this.maxBytes) {
           throw new Error(
@@ -247,12 +308,12 @@
           );
         }
 
-        this.chunks.push(chunk);
-        this.available += chunk.byteLength;
+        this.chunks.push(result.value);
+        this.available += result.value.byteLength;
       }
     }
 
-    consume(length, destination, destinationOffset) {
+    consume(length, destination) {
       let remaining = length;
       let written = 0;
 
@@ -273,7 +334,7 @@
               this.firstOffset,
               this.firstOffset + amount
             ),
-            destinationOffset + written
+            written
           );
         }
 
@@ -307,7 +368,7 @@
       }
 
       const output = new Uint8Array(length);
-      this.consume(length, output, 0);
+      this.consume(length, output);
 
       return output;
     }
@@ -331,7 +392,7 @@
           this.available
         );
 
-        this.consume(amount, null, 0);
+        this.consume(amount, null);
         remaining -= amount;
       }
     }
@@ -340,13 +401,13 @@
       try {
         await this.reader.cancel();
       } catch {
-        // Flujo ya cerrado.
+        // Flujo cerrado.
       }
     }
   }
 
   // ======================================
-  // LECTURA DEL TAMAÑO TAR
+  // LECTOR DE TAMAÑO TAR
   // ======================================
 
   function parseTarSize(bytes) {
@@ -378,16 +439,14 @@
     const value = parseInt(text, 8);
 
     if (!Number.isSafeInteger(value) || value < 0) {
-      throw new Error(
-        "El archivo TAR contiene un tamaño inválido."
-      );
+      throw new Error("Tamaño TAR inválido.");
     }
 
     return value;
   }
 
   // ======================================
-  // ANALIZAR TAR.GZ PROGRESIVAMENTE
+  // ANALISIS TAR.GZ
   // ======================================
 
   async function analyzeTarStream(stream) {
@@ -401,6 +460,8 @@
 
     let totalTextSize = 0;
     let entries = 0;
+    let skippedBinary = 0;
+    let skippedUnsupported = 0;
     let truncated = false;
 
     try {
@@ -444,8 +505,10 @@
 
         const eligible =
           regularFile &&
-          isTextFile(path) &&
-          size <= MAX_FILE_SIZE;
+          hasTextExtension(path) &&
+          !isSafePath(path) &&
+          size > 0 &&
+          size <= MAX_TEXT_FILE_SIZE;
 
         const withinTotalLimit =
           totalTextSize + size <= MAX_TOTAL_TEXT_SIZE;
@@ -467,25 +530,33 @@
             );
           }
 
-          totalTextSize += data.byteLength;
+          if (!isProbablyText(data)) {
+            skippedBinary++;
+          } else {
+            totalTextSize += data.byteLength;
 
-          const text = new TextDecoder(
-            "utf-8",
-            { fatal: false }
-          ).decode(data);
+            const text = new TextDecoder(
+              "utf-8",
+              { fatal: false }
+            ).decode(data);
 
-          inspected.push(cleanPath(path));
+            inspected.push(cleanPath(path));
 
-          findings.push(
-            ...analyzeText(text, path)
-          );
-
+            findings.push(
+              ...analyzeText(text, path)
+            );
+          }
         } else {
-          if (
-            eligible &&
-            (!withinTotalLimit || !withinFileLimit)
-          ) {
+          if (eligible && !withinTotalLimit) {
             truncated = true;
+          }
+
+          if (eligible && !withinFileLimit) {
+            truncated = true;
+          }
+
+          if (!eligible) {
+            skippedUnsupported++;
           }
 
           await source.skip(size);
@@ -510,6 +581,8 @@
         findings,
         totalSize: totalTextSize,
         entries,
+        skippedBinary,
+        skippedUnsupported,
         truncated
       };
 
@@ -519,14 +592,12 @@
   }
 
   // ======================================
-  // ANALIZAR ZIP
+  // ANALISIS ZIP
   // ======================================
 
   async function analyzeZip(file) {
     if (!window.JSZip) {
-      throw new Error(
-        "Falta cargar la biblioteca JSZip."
-      );
+      throw new Error("No se encontró JSZip.");
     }
 
     const archive = await window.JSZip.loadAsync(file);
@@ -535,13 +606,21 @@
     const inspected = [];
 
     let totalSize = 0;
-    let truncated = false;
     let entries = 0;
+    let skippedBinary = 0;
+    let skippedUnsupported = 0;
+    let truncated = false;
 
     for (const [path, entry] of Object.entries(archive.files)) {
       entries++;
 
-      if (entry.dir || !isTextFile(path)) {
+      if (entry.dir) continue;
+
+      if (
+        !hasTextExtension(path) ||
+        isSafePath(path)
+      ) {
+        skippedUnsupported++;
         continue;
       }
 
@@ -552,24 +631,36 @@
 
       if (
         entry._data &&
-        entry._data.uncompressedSize > MAX_FILE_SIZE
+        entry._data.uncompressedSize > MAX_TEXT_FILE_SIZE
       ) {
+        skippedUnsupported++;
         continue;
       }
 
-      const text = await entry.async("string");
-      const size = new Blob([text]).size;
+      const data = await entry.async("uint8array");
 
-      if (size > MAX_FILE_SIZE) {
+      if (data.byteLength > MAX_TEXT_FILE_SIZE) {
+        skippedUnsupported++;
         continue;
       }
 
-      if (totalSize + size > MAX_TOTAL_TEXT_SIZE) {
+      if (!isProbablyText(data)) {
+        skippedBinary++;
+        continue;
+      }
+
+      if (totalSize + data.byteLength > MAX_TOTAL_TEXT_SIZE) {
         truncated = true;
         break;
       }
 
-      totalSize += size;
+      totalSize += data.byteLength;
+
+      const text = new TextDecoder(
+        "utf-8",
+        { fatal: false }
+      ).decode(data);
+
       inspected.push(cleanPath(path));
 
       findings.push(
@@ -582,6 +673,8 @@
       findings,
       totalSize,
       entries,
+      skippedBinary,
+      skippedUnsupported,
       truncated
     };
   }
@@ -593,7 +686,7 @@
   async function analyzeGzip(file) {
     if (typeof DecompressionStream === "undefined") {
       throw new Error(
-        "Este navegador no permite descomprimir GZIP. Actualiza Safari."
+        "Este navegador no permite descomprimir GZIP."
       );
     }
 
@@ -633,16 +726,8 @@
       result = await analyzeGzip(file);
 
     } else {
-      throw new Error(
-        "Formato no compatible con este motor."
-      );
+      throw new Error("Formato no compatible.");
     }
-
-    const categories = [
-      ...new Set(
-        result.findings.map(item => item.category)
-      )
-    ];
 
     const highCount = result.findings.filter(
       item => item.severity === "high"
@@ -652,9 +737,15 @@
       item => item.severity === "medium"
     ).length;
 
+    const categories = [
+      ...new Set(
+        result.findings.map(item => item.category)
+      )
+    ];
+
     return {
       engine: "J-SCANNER IPHONE",
-      version: "1.2",
+      version: "1.3",
 
       fileName: file.name,
       fileSize: file.size,
@@ -667,6 +758,9 @@
       mediumRiskCount: mediumCount,
 
       entriesProcessed: result.entries,
+      skippedBinary: result.skippedBinary,
+      skippedUnsupported: result.skippedUnsupported,
+
       truncated: result.truncated,
 
       status: result.findings.length
@@ -674,7 +768,7 @@
         : "NO_INDICATORS_FOUND",
 
       disclaimer:
-        "J-Scanner encontró referencias técnicas que pueden requerir revisión. Los indicadores no demuestran por sí solos el uso de hacks ni modificaciones de Free Fire. Este análisis examina archivos de texto disponibles en el Sysdiagnose y no accede a los datos privados ni verifica directamente la integridad del juego. Puede haber falsos positivos y falsos negativos."
+        "J-Scanner 1.3 filtra archivos binarios y rutas conocidas del sistema iOS. Los indicadores son referencias técnicas que requieren revisión manual. No demuestran por sí solos el uso de hacks ni modificaciones de Free Fire. El análisis no accede a los datos privados del juego ni verifica directamente su integridad. Puede haber falsos positivos y falsos negativos."
     };
   }
 
@@ -684,7 +778,7 @@
 
   window.JScannerIPhone = {
     scan: scan,
-    version: "1.2"
+    version: "1.3"
   };
 
 })();
