@@ -4,8 +4,10 @@
 // ========================================
 // J-SCANNER
 // SISTEMA PRINCIPAL
-// VERSION 1.2
+// VERSION 1.3
 // ========================================
+
+const APP_VERSION = "1.3";
 
 const deviceCards = document.querySelectorAll(".device-card");
 const fileInput = document.getElementById("fileInput");
@@ -118,6 +120,55 @@ function updateScanButton() {
 
   scanButton.disabled = !available;
   scanButton.style.opacity = available ? "1" : "0.5";
+}
+
+// ========================================
+// VERSION REAL DEL MOTOR
+// ========================================
+
+function getEngineVersion(result) {
+  const engineVersion = window.JScannerIPhone?.version;
+
+  if (engineVersion) {
+    return String(engineVersion);
+  }
+
+  if (result && result.version) {
+    return String(result.version);
+  }
+
+  return "No disponible";
+}
+
+// ========================================
+// LIMPIAR EVIDENCIAS ILEGIBLES
+// ========================================
+
+function cleanEvidenceText(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+
+  const cleaned = value
+    .replace(/\uFFFD/g, "")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[^\x20-\x7E\u00A0-\u024F\u1E00-\u1EFF]/g, "");
+
+  const usefulCharacters = cleaned.replace(/[\s]/g, "").length;
+
+  if (usefulCharacters < 8) {
+    return "";
+  }
+
+  const readableCharacters = cleaned.match(/[a-zA-Z0-9áéíóúÁÉÍÓÚñÑ/_.:-]/g) || [];
+
+  const readability = readableCharacters.length / usefulCharacters;
+
+  if (readability < 0.65) {
+    return "";
+  }
+
+  return cleaned.trim();
 }
 
 // ========================================
@@ -264,17 +315,24 @@ function renderEvidence(finding, parent) {
 
   evidenceTitle.style.marginTop = "16px";
 
-  if (evidenceList.length === 0) {
+  const readableEvidence = evidenceList
+    .map(evidence => ({
+      ...evidence,
+      readableText: cleanEvidenceText(evidence.text || "")
+    }))
+    .filter(evidence => evidence.readableText.length > 0);
+
+  if (readableEvidence.length === 0) {
     createElement(
       "p",
-      "El motor no proporcionó fragmentos de evidencia para este indicador.",
+      "Los fragmentos disponibles no contienen texto suficientemente legible para mostrarse. Se requiere revisar el archivo original.",
       parent
     );
 
     return;
   }
 
-  evidenceList.forEach((evidence, index) => {
+  readableEvidence.forEach((evidence, index) => {
     const evidenceBox = document.createElement("div");
 
     evidenceBox.style.background = "rgba(0,0,0,0.22)";
@@ -299,7 +357,7 @@ function renderEvidence(finding, parent) {
 
     const excerpt = createElement(
       "p",
-      evidence.text || "Sin contenido disponible.",
+      evidence.readableText,
       evidenceBox
     );
 
@@ -421,13 +479,13 @@ function renderResults(result) {
 
   createElement(
     "p",
-    "Motor: " + (result.engine || "J-SCANNER"),
+    "Motor: " + (result.engine || "J-SCANNER IPHONE"),
     scanResults
   );
 
   createElement(
     "p",
-    "Versión: " + (result.version || "No especificada"),
+    "Versión: " + getEngineVersion(result),
     scanResults
   );
 
