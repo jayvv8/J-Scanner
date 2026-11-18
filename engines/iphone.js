@@ -3,8 +3,8 @@
 ========================================
  J-SCANNER
  IPHONE DIAGNOSTIC ENGINE
- Version 1.1
- STREAMING TAR.GZ SCANNER
+ Version 1.2
+ EVIDENCE-BASED SCANNER
 ========================================
 */
 
@@ -12,84 +12,117 @@
   "use strict";
 
   // ======================================
-  // LÍMITES DE SEGURIDAD
+  // LIMITES DE SEGURIDAD
   // ======================================
 
   const MAX_FILE_SIZE = 2 * 1024 * 1024;
-
-  const MAX_TOTAL_TEXT_SIZE =
-    80 * 1024 * 1024;
-
-  const MAX_DECOMPRESSED_SIZE =
-    2 * 1024 * 1024 * 1024;
-
-  const MAX_ORIGINAL_SIZE =
-    1024 * 1024 * 1024;
-
+  const MAX_TOTAL_TEXT_SIZE = 80 * 1024 * 1024;
+  const MAX_DECOMPRESSED_SIZE = 2 * 1024 * 1024 * 1024;
+  const MAX_ORIGINAL_SIZE = 1024 * 1024 * 1024;
   const MAX_ENTRIES = 50000;
-
   const MAX_INSPECTED_FILES = 10000;
-
-  // ======================================
-  // INDICADORES
-  // ======================================
-
-  const INDICATORS = [
-    {
-      name: "Jailbreak",
-      category: "Sistema",
-      severity: "warning",
-      patterns: [
-        /\bjailbreak\b/gi,
-        /\bcydia\b/gi,
-        /\bsileo\b/gi,
-        /\bzebra\b/gi
-      ]
-    },
-    {
-      name: "Framework de modificación",
-      category: "Modificación",
-      severity: "warning",
-      patterns: [
-        /\bsubstrate\b/gi,
-        /\bsubstitute\b/gi,
-        /\bellekit\b/gi,
-        /\blibhooker\b/gi
-      ]
-    },
-    {
-      name: "Herramientas de instrumentación",
-      category: "Inyección",
-      severity: "warning",
-      patterns: [
-        /\bfrida\b/gi,
-        /\bdylib\b/gi,
-        /DYLD_INSERT_LIBRARIES/gi,
-        /\binjection\b/gi
-      ]
-    },
-    {
-      name: "Modificaciones de aplicaciones",
-      category: "Aplicaciones",
-      severity: "info",
-      patterns: [
-        /\bmodified application\b/gi,
-        /\bunsigned executable\b/gi,
-        /\bcode signature invalid\b/gi
-      ]
-    }
-  ];
+  const MAX_EVIDENCE_PER_RULE = 4;
 
   const TEXT_EXTENSIONS = [
-    ".txt",
-    ".log",
-    ".plist",
-    ".json",
-    ".xml",
-    ".ips",
-    ".crash",
-    ".panic",
-    ".csv"
+    ".txt", ".log", ".plist", ".json",
+    ".xml", ".ips", ".crash", ".panic", ".csv"
+  ];
+
+  // ======================================
+  // REGLAS DE DETECCION
+  // No se consideran pruebas de trampas.
+  // ======================================
+
+  const RULES = [
+    {
+      id: "frida_artifact",
+      name: "Artefacto de Frida",
+      category: "Instrumentación",
+      severity: "high",
+      confidence: "Indicador fuerte",
+      explanation:
+        "Se encontró una referencia específica a un componente de Frida. Debe comprobarse si corresponde a una herramienta activa o a un registro histórico.",
+      pattern:
+        /\bfrida(?:-server|-gadget|-agent)?\b/i,
+      validate: function (line) {
+        return /\b(frida-server|frida-gadget|frida-agent)\b/i.test(line) ||
+          (/\bfrida\b/i.test(line) &&
+           /\b(27042|27043|gadget|server|agent|attach|spawn)\b/i.test(line));
+      }
+    },
+    {
+      id: "dyld_injection",
+      name: "Variable de carga dinámica",
+      category: "Carga de bibliotecas",
+      severity: "high",
+      confidence: "Indicador fuerte",
+      explanation:
+        "Se encontró una asignación de DYLD_INSERT_LIBRARIES con una ruta. La referencia por sí sola no demuestra que una biblioteca haya sido cargada.",
+      pattern:
+        /\bDYLD_INSERT_LIBRARIES\b/i,
+      validate: function (line) {
+        return /DYLD_INSERT_LIBRARIES\s*=\s*["']?\/[^;\s"']+/i.test(line);
+      }
+    },
+    {
+      id: "jailbreak_paths",
+      name: "Ruta asociada a jailbreak",
+      category: "Sistema",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation:
+        "Se encontró una ruta habitualmente asociada a entornos modificados de iOS. Hay que verificar si está activa y a qué proceso pertenece.",
+      pattern:
+        /\/(?:Applications\/Cydia\.app|Library\/MobileSubstrate|var\/jb|usr\/lib\/TweakInject|Library\/PreferenceBundles)/i,
+      validate: function (line) {
+        return /\/(?:Applications\/Cydia\.app|Library\/MobileSubstrate|var\/jb|usr\/lib\/TweakInject|Library\/PreferenceBundles)/i.test(line);
+      }
+    },
+    {
+      id: "injection_framework",
+      name: "Framework de modificación",
+      category: "Bibliotecas",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation:
+        "Se encontró una referencia a un framework utilizado para modificar o instrumentar procesos. Puede aparecer en registros sin que exista una modificación activa.",
+      pattern:
+        /\b(?:MobileSubstrate|Substrate|Substitute|ElleKit|libhooker)\b/i,
+      validate: function (line) {
+        return /\b(?:MobileSubstrate|Substrate|Substitute|ElleKit|libhooker)\b/i.test(line) &&
+          /\b(load|loaded|loading|injected|injection|dylib|library|image|process|mapped)\b/i.test(line);
+      }
+    },
+    {
+      id: "signature_failure",
+      name: "Error de firma de código",
+      category: "Integridad de aplicaciones",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation:
+        "Se encontró un mensaje relacionado con una firma de código inválida. Puede deberse a errores legítimos de instalación, desarrollo o actualización.",
+      pattern:
+        /(?:code signature invalid|invalid code signature|signature validation failed)/i,
+      validate: function (line) {
+        return /(?:code signature invalid|invalid code signature|signature validation failed)/i.test(line) &&
+          /\b(amfi|codesign|executable|process|bundle|application)\b/i.test(line);
+      }
+    },
+    {
+      id: "modified_executable",
+      name: "Ejecutable posiblemente modificado",
+      category: "Integridad de aplicaciones",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation:
+        "Se encontró una referencia a un ejecutable sin firma válida. Es necesario identificar la aplicación y comprobar el origen del registro.",
+      pattern:
+        /\bunsigned executable\b/i,
+      validate: function (line) {
+        return /\bunsigned executable\b/i.test(line) &&
+          /\b(path|process|bundle|application|amfi|executable)\b/i.test(line);
+      }
+    }
   ];
 
   // ======================================
@@ -97,49 +130,83 @@
   // ======================================
 
   function isTextFile(name) {
-    const lower = name.toLowerCase();
+    const lower = String(name).toLowerCase();
 
-    return (
-      TEXT_EXTENSIONS.some(ext =>
-        lower.endsWith(ext)
-      ) ||
+    return TEXT_EXTENSIONS.some(function (ext) {
+      return lower.endsWith(ext);
+    }) ||
       lower.includes("log") ||
       lower.includes("panic") ||
-      lower.includes("crash")
-    );
+      lower.includes("crash");
   }
 
   function cleanPath(path) {
     return String(path)
       .replace(/\\/g, "/")
-      .slice(0, 300);
+      .replace(/\0/g, "")
+      .slice(0, 500);
   }
+
+  function cleanEvidence(line) {
+    return String(line)
+      .replace(/\0/g, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 350);
+  }
+
+  // ======================================
+  // ANALISIS CONTEXTUAL
+  // ======================================
 
   function analyzeText(text, filePath) {
     const findings = [];
+    const lines = String(text).split(/\r?\n/);
 
-    for (const indicator of INDICATORS) {
-      let matches = 0;
+    for (const rule of RULES) {
+      const evidence = [];
+      const seen = new Set();
 
-      for (const pattern of indicator.patterns) {
-        pattern.lastIndex = 0;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
 
-        const found = text.match(pattern);
+        if (!rule.pattern.test(line)) {
+          continue;
+        }
 
-        if (found) {
-          matches += found.length;
+        if (!rule.validate(line)) {
+          continue;
+        }
+
+        const excerpt = cleanEvidence(line);
+
+        if (!excerpt || seen.has(excerpt)) {
+          continue;
+        }
+
+        seen.add(excerpt);
+
+        evidence.push({
+          line: i + 1,
+          text: excerpt
+        });
+
+        if (evidence.length >= MAX_EVIDENCE_PER_RULE) {
+          break;
         }
       }
 
-      if (matches > 0) {
+      if (evidence.length > 0) {
         findings.push({
-          name: indicator.name,
-          category: indicator.category,
-          severity: indicator.severity,
+          id: rule.id,
+          name: rule.name,
+          category: rule.category,
+          severity: rule.severity,
+          confidence: rule.confidence,
+          explanation: rule.explanation,
           file: cleanPath(filePath),
-          occurrences: matches,
-          confidence:
-            "Baja: requiere verificación manual"
+          occurrences: evidence.length,
+          evidence: evidence
         });
       }
     }
@@ -155,20 +222,15 @@
     constructor(stream, maxBytes) {
       this.reader = stream.getReader();
       this.maxBytes = maxBytes;
-
       this.chunks = [];
       this.firstOffset = 0;
       this.available = 0;
-
       this.totalRead = 0;
       this.done = false;
     }
 
     async fill(minimum) {
-      while (
-        this.available < minimum &&
-        !this.done
-      ) {
+      while (this.available < minimum && !this.done) {
         const result = await this.reader.read();
 
         if (result.done) {
@@ -177,7 +239,6 @@
         }
 
         const chunk = result.value;
-
         this.totalRead += chunk.byteLength;
 
         if (this.totalRead > this.maxBytes) {
@@ -218,13 +279,10 @@
 
         this.firstOffset += amount;
         this.available -= amount;
-
         remaining -= amount;
         written += amount;
 
-        if (
-          this.firstOffset >= chunk.byteLength
-        ) {
+        if (this.firstOffset >= chunk.byteLength) {
           this.chunks.shift();
           this.firstOffset = 0;
         }
@@ -249,7 +307,6 @@
       }
 
       const output = new Uint8Array(length);
-
       this.consume(length, output, 0);
 
       return output;
@@ -275,7 +332,6 @@
         );
 
         this.consume(amount, null, 0);
-
         remaining -= amount;
       }
     }
@@ -284,33 +340,28 @@
       try {
         await this.reader.cancel();
       } catch {
-        // El flujo puede estar cerrado.
+        // Flujo ya cerrado.
       }
     }
   }
 
   // ======================================
-  // LECTURA DE TAMAÑO TAR
+  // LECTURA DEL TAMAÑO TAR
   // ======================================
 
   function parseTarSize(bytes) {
-    // Formato base-256 de TAR
-
     if (bytes[0] & 0x80) {
       let value = 0;
 
       for (let i = 0; i < bytes.length; i++) {
-        const byte =
-          i === 0
-            ? bytes[i] & 0x7f
-            : bytes[i];
+        const byte = i === 0
+          ? bytes[i] & 0x7f
+          : bytes[i];
 
         value = value * 256 + byte;
 
         if (!Number.isSafeInteger(value)) {
-          throw new Error(
-            "Tamaño TAR no compatible."
-          );
+          throw new Error("Tamaño TAR no compatible.");
         }
       }
 
@@ -326,10 +377,7 @@
 
     const value = parseInt(text, 8);
 
-    if (
-      !Number.isSafeInteger(value) ||
-      value < 0
-    ) {
+    if (!Number.isSafeInteger(value) || value < 0) {
       throw new Error(
         "El archivo TAR contiene un tamaño inválido."
       );
@@ -339,7 +387,7 @@
   }
 
   // ======================================
-  // ANALIZAR TAR PROGRESIVAMENTE
+  // ANALIZAR TAR.GZ PROGRESIVAMENTE
   // ======================================
 
   async function analyzeTarStream(stream) {
@@ -390,20 +438,25 @@
         );
 
         const regularFile =
-          type === "\0" ||
-          type === "0";
+          type === "\0" || type === "0";
 
-        const padding =
-          (512 - (size % 512)) % 512;
+        const padding = (512 - (size % 512)) % 512;
 
-        const canInspect =
+        const eligible =
           regularFile &&
           isTextFile(path) &&
-          size <= MAX_FILE_SIZE &&
-          totalTextSize + size <=
-            MAX_TOTAL_TEXT_SIZE &&
-          inspected.length <
-            MAX_INSPECTED_FILES;
+          size <= MAX_FILE_SIZE;
+
+        const withinTotalLimit =
+          totalTextSize + size <= MAX_TOTAL_TEXT_SIZE;
+
+        const withinFileLimit =
+          inspected.length < MAX_INSPECTED_FILES;
+
+        const canInspect =
+          eligible &&
+          withinTotalLimit &&
+          withinFileLimit;
 
         if (canInspect) {
           const data = await source.readExact(size);
@@ -428,6 +481,13 @@
           );
 
         } else {
+          if (
+            eligible &&
+            (!withinTotalLimit || !withinFileLimit)
+          ) {
+            truncated = true;
+          }
+
           await source.skip(size);
         }
 
@@ -435,9 +495,7 @@
           await source.skip(padding);
         }
 
-        if (
-          inspected.length >= MAX_INSPECTED_FILES
-        ) {
+        if (!withinFileLimit) {
           truncated = true;
           break;
         }
@@ -471,50 +529,48 @@
       );
     }
 
-    const archive =
-      await window.JSZip.loadAsync(file);
+    const archive = await window.JSZip.loadAsync(file);
 
     const findings = [];
     const inspected = [];
 
     let totalSize = 0;
+    let truncated = false;
+    let entries = 0;
 
-    for (const [path, entry] of
-      Object.entries(archive.files)) {
+    for (const [path, entry] of Object.entries(archive.files)) {
+      entries++;
 
       if (entry.dir || !isTextFile(path)) {
         continue;
       }
 
-      if (
-        inspected.length >= MAX_INSPECTED_FILES
-      ) {
+      if (inspected.length >= MAX_INSPECTED_FILES) {
+        truncated = true;
         break;
       }
 
       if (
         entry._data &&
-        entry._data.uncompressedSize >
-          MAX_FILE_SIZE
+        entry._data.uncompressedSize > MAX_FILE_SIZE
       ) {
         continue;
       }
 
       const text = await entry.async("string");
-
       const size = new Blob([text]).size;
 
       if (size > MAX_FILE_SIZE) {
         continue;
       }
 
-      totalSize += size;
-
-      if (totalSize > MAX_TOTAL_TEXT_SIZE) {
+      if (totalSize + size > MAX_TOTAL_TEXT_SIZE) {
+        truncated = true;
         break;
       }
 
-      inspected.push(path);
+      totalSize += size;
+      inspected.push(cleanPath(path));
 
       findings.push(
         ...analyzeText(text, path)
@@ -525,21 +581,19 @@
       inspected,
       findings,
       totalSize,
-      entries: inspected.length,
-      truncated: false
+      entries,
+      truncated
     };
   }
 
   // ======================================
-  // DESCOMPRESIÓN GZIP EN FLUJO
+  // DESCOMPRESION GZIP
   // ======================================
 
   async function analyzeGzip(file) {
-    if (
-      typeof DecompressionStream === "undefined"
-    ) {
+    if (typeof DecompressionStream === "undefined") {
       throw new Error(
-        "Este navegador no permite descomprimir GZIP. Actualiza Safari o utiliza otro navegador compatible."
+        "Este navegador no permite descomprimir GZIP. Actualiza Safari."
       );
     }
 
@@ -551,7 +605,7 @@
   }
 
   // ======================================
-  // FUNCIÓN PRINCIPAL
+  // FUNCION PRINCIPAL
   // ======================================
 
   async function scan(file) {
@@ -566,7 +620,6 @@
     }
 
     const name = file.name.toLowerCase();
-
     let result;
 
     if (name.endsWith(".zip")) {
@@ -587,22 +640,31 @@
 
     const categories = [
       ...new Set(
-        result.findings.map(
-          item => item.category
-        )
+        result.findings.map(item => item.category)
       )
     ];
 
+    const highCount = result.findings.filter(
+      item => item.severity === "high"
+    ).length;
+
+    const mediumCount = result.findings.filter(
+      item => item.severity === "medium"
+    ).length;
+
     return {
       engine: "J-SCANNER IPHONE",
-      version: "1.1",
+      version: "1.2",
 
       fileName: file.name,
       fileSize: file.size,
 
       scannedFiles: result.inspected.length,
       findings: result.findings,
-      categories,
+      categories: categories,
+
+      highRiskCount: highCount,
+      mediumRiskCount: mediumCount,
 
       entriesProcessed: result.entries,
       truncated: result.truncated,
@@ -612,7 +674,7 @@
         : "NO_INDICATORS_FOUND",
 
       disclaimer:
-        "La ausencia de indicadores no demuestra que el dispositivo esté libre de hacks. Las coincidencias son indicios y requieren verificación manual. El análisis puede no incluir todos los archivos del diagnóstico."
+        "J-Scanner encontró referencias técnicas que pueden requerir revisión. Los indicadores no demuestran por sí solos el uso de hacks ni modificaciones de Free Fire. Este análisis examina archivos de texto disponibles en el Sysdiagnose y no accede a los datos privados ni verifica directamente la integridad del juego. Puede haber falsos positivos y falsos negativos."
     };
   }
 
@@ -621,8 +683,8 @@
   // ======================================
 
   window.JScannerIPhone = {
-    scan,
-    version: "1.1"
+    scan: scan,
+    version: "1.2"
   };
 
 })();
