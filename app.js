@@ -4,6 +4,7 @@
 // ========================================
 // J-SCANNER
 // SISTEMA PRINCIPAL
+// VERSION 1.2
 // ========================================
 
 const deviceCards = document.querySelectorAll(".device-card");
@@ -14,7 +15,6 @@ const uploadDescription = document.getElementById("uploadDescription");
 const fileName = document.getElementById("fileName");
 const scanStatus = document.getElementById("scanStatus");
 const scanResults = document.getElementById("scanResults");
-
 const loginButton = document.getElementById("loginButton");
 const premiumButton = document.getElementById("premiumButton");
 
@@ -23,7 +23,7 @@ let selectedFile = null;
 let isScanning = false;
 
 // ========================================
-// CONFIGURACIÓN DE DISPOSITIVOS
+// CONFIGURACION DE DISPOSITIVOS
 // ========================================
 
 const deviceConfig = {
@@ -43,7 +43,7 @@ const deviceConfig = {
 };
 
 // ========================================
-// CREAR BOTÓN DE ANÁLISIS
+// CREAR BOTON DE ANALISIS
 // ========================================
 
 const scanButton = document.createElement("button");
@@ -52,7 +52,6 @@ scanButton.type = "button";
 scanButton.id = "startScanButton";
 scanButton.textContent = "ANALIZAR ARCHIVO";
 scanButton.disabled = true;
-
 scanButton.style.display = "block";
 scanButton.style.width = "100%";
 scanButton.style.marginTop = "15px";
@@ -81,6 +80,20 @@ function showMessage(message) {
   scanResults.appendChild(paragraph);
 }
 
+function createElement(tag, text, parent) {
+  const element = document.createElement(tag);
+
+  if (text !== undefined && text !== null) {
+    element.textContent = String(text);
+  }
+
+  if (parent) {
+    parent.appendChild(element);
+  }
+
+  return element;
+}
+
 function getExtension(filename) {
   const lower = filename.toLowerCase();
 
@@ -105,6 +118,35 @@ function updateScanButton() {
 
   scanButton.disabled = !available;
   scanButton.style.opacity = available ? "1" : "0.5";
+}
+
+// ========================================
+// COLORES DE RIESGO
+// ========================================
+
+function getRiskInfo(severity) {
+  switch (severity) {
+    case "high":
+      return {
+        label: "RIESGO ALTO",
+        color: "#ff6464",
+        description: "Indicador fuerte que necesita comprobación."
+      };
+
+    case "medium":
+      return {
+        label: "RIESGO MEDIO",
+        color: "#ffc15c",
+        description: "Indicador contextual que requiere revisión."
+      };
+
+    default:
+      return {
+        label: "RIESGO BAJO",
+        color: "#65baff",
+        description: "Referencia informativa sin confirmación."
+      };
+  }
 }
 
 // ========================================
@@ -206,115 +248,389 @@ fileInput.addEventListener("change", () => {
 });
 
 // ========================================
-// MOSTRAR RESULTADOS
+// MOSTRAR EVIDENCIAS
+// ========================================
+
+function renderEvidence(finding, parent) {
+  const evidenceList = Array.isArray(finding.evidence)
+    ? finding.evidence
+    : [];
+
+  const evidenceTitle = createElement(
+    "h4",
+    "EVIDENCIAS ENCONTRADAS",
+    parent
+  );
+
+  evidenceTitle.style.marginTop = "16px";
+
+  if (evidenceList.length === 0) {
+    createElement(
+      "p",
+      "El motor no proporcionó fragmentos de evidencia para este indicador.",
+      parent
+    );
+
+    return;
+  }
+
+  evidenceList.forEach((evidence, index) => {
+    const evidenceBox = document.createElement("div");
+
+    evidenceBox.style.background = "rgba(0,0,0,0.22)";
+    evidenceBox.style.padding = "10px";
+    evidenceBox.style.marginTop = "8px";
+    evidenceBox.style.borderRadius = "8px";
+    evidenceBox.style.overflowWrap = "anywhere";
+
+    createElement(
+      "strong",
+      "Fragmento " + (index + 1),
+      evidenceBox
+    );
+
+    if (evidence.line !== undefined) {
+      createElement(
+        "p",
+        "Línea: " + evidence.line,
+        evidenceBox
+      );
+    }
+
+    const excerpt = createElement(
+      "p",
+      evidence.text || "Sin contenido disponible.",
+      evidenceBox
+    );
+
+    excerpt.style.fontSize = "13px";
+    excerpt.style.whiteSpace = "pre-wrap";
+    excerpt.style.overflowWrap = "anywhere";
+
+    parent.appendChild(evidenceBox);
+  });
+}
+
+// ========================================
+// TARJETA DE CADA HALLAZGO
+// ========================================
+
+function renderFinding(finding, index) {
+  const item = document.createElement("div");
+
+  item.style.padding = "16px";
+  item.style.marginTop = "14px";
+  item.style.borderRadius = "12px";
+  item.style.background = "rgba(255,255,255,0.06)";
+  item.style.border = "1px solid rgba(255,255,255,0.09)";
+  item.style.overflowWrap = "anywhere";
+
+  const risk = getRiskInfo(finding.severity);
+
+  const heading = createElement(
+    "h3",
+    (index + 1) + ". " + (finding.name || "Indicador sin nombre"),
+    item
+  );
+
+  heading.style.marginBottom = "12px";
+
+  const riskLabel = createElement(
+    "strong",
+    risk.label,
+    item
+  );
+
+  riskLabel.style.color = risk.color;
+  riskLabel.style.display = "block";
+  riskLabel.style.marginBottom = "8px";
+
+  createElement(
+    "p",
+    "Categoría: " + (finding.category || "No especificada"),
+    item
+  );
+
+  createElement(
+    "p",
+    "Clasificación: " + (finding.confidence || "No especificada"),
+    item
+  );
+
+  createElement(
+    "p",
+    risk.description,
+    item
+  );
+
+  createElement(
+    "p",
+    "Archivo: " + (finding.file || "No especificado"),
+    item
+  );
+
+  createElement(
+    "p",
+    "Fragmentos de evidencia mostrados: " +
+      (Array.isArray(finding.evidence)
+        ? finding.evidence.length
+        : 0),
+    item
+  );
+
+  const explanation = document.createElement("div");
+
+  explanation.style.marginTop = "12px";
+  explanation.style.padding = "10px";
+  explanation.style.background = "rgba(0,0,0,0.18)";
+  explanation.style.borderRadius = "8px";
+
+  createElement(
+    "strong",
+    "¿Por qué aparece este resultado?",
+    explanation
+  );
+
+  createElement(
+    "p",
+    finding.explanation || "No hay explicación disponible.",
+    explanation
+  );
+
+  item.appendChild(explanation);
+
+  renderEvidence(finding, item);
+
+  return item;
+}
+
+// ========================================
+// MOSTRAR INFORME COMPLETO
 // ========================================
 
 function renderResults(result) {
   scanResults.replaceChildren();
 
-  const heading = document.createElement("h3");
+  const heading = createElement(
+    "h2",
+    "INFORME DE J-SCANNER",
+    scanResults
+  );
 
-  heading.textContent = "INFORME DE J-SCANNER";
+  heading.style.marginBottom = "16px";
 
-  scanResults.appendChild(heading);
+  createElement(
+    "p",
+    "Motor: " + (result.engine || "J-SCANNER"),
+    scanResults
+  );
 
-  const summary = document.createElement("p");
+  createElement(
+    "p",
+    "Versión: " + (result.version || "No especificada"),
+    scanResults
+  );
 
-  summary.textContent =
-    "Archivos examinados: " + result.scannedFiles;
+  createElement(
+    "p",
+    "Archivo: " + (result.fileName || "No especificado"),
+    scanResults
+  );
+
+  createElement(
+    "p",
+    "Archivos examinados: " + (result.scannedFiles ?? 0),
+    scanResults
+  );
+
+  createElement(
+    "p",
+    "Entradas TAR procesadas: " + (result.entriesProcessed ?? "No disponible"),
+    scanResults
+  );
+
+  createElement(
+    "p",
+    "Hallazgos distintos: " +
+      (Array.isArray(result.findings)
+        ? result.findings.length
+        : 0),
+    scanResults
+  );
+
+  const findings = Array.isArray(result.findings)
+    ? result.findings
+    : [];
+
+  const highCount = findings.filter(
+    item => item.severity === "high"
+  ).length;
+
+  const mediumCount = findings.filter(
+    item => item.severity === "medium"
+  ).length;
+
+  const lowCount = findings.filter(
+    item => item.severity !== "high" &&
+      item.severity !== "medium"
+  ).length;
+
+  const summary = document.createElement("div");
+
+  summary.style.padding = "14px";
+  summary.style.marginTop = "16px";
+  summary.style.borderRadius = "10px";
+  summary.style.background = "rgba(255,255,255,0.06)";
+
+  createElement("h3", "RESUMEN DE RIESGOS", summary);
+
+  const high = createElement(
+    "p",
+    "Riesgo alto: " + highCount,
+    summary
+  );
+  high.style.color = "#ff6464";
+
+  const medium = createElement(
+    "p",
+    "Riesgo medio: " + mediumCount,
+    summary
+  );
+  medium.style.color = "#ffc15c";
+
+  const low = createElement(
+    "p",
+    "Riesgo bajo o informativo: " + lowCount,
+    summary
+  );
+  low.style.color = "#65baff";
 
   scanResults.appendChild(summary);
 
-  const fileInfo = document.createElement("p");
+  // ======================================
+  // ESTADO DEL ANALISIS
+  // ======================================
 
-  fileInfo.textContent =
-    "Archivo: " + result.fileName;
+  const statusBox = document.createElement("div");
 
-  scanResults.appendChild(fileInfo);
-
-  const status = document.createElement("p");
+  statusBox.style.padding = "14px";
+  statusBox.style.marginTop = "14px";
+  statusBox.style.borderRadius = "10px";
+  statusBox.style.background = "rgba(56,232,165,0.08)";
 
   if (result.status === "NO_INDICATORS_FOUND") {
-    status.textContent =
-      "RESULTADO: No se encontraron indicadores conocidos.";
+    createElement(
+      "strong",
+      "No se encontraron indicadores conocidos.",
+      statusBox
+    );
+
+    createElement(
+      "p",
+      "Esto no garantiza que el dispositivo o el juego estén libres de modificaciones.",
+      statusBox
+    );
 
   } else {
-    status.textContent =
-      "RESULTADO: Se encontraron indicadores que requieren revisión.";
+    createElement(
+      "strong",
+      "Se encontraron indicadores que requieren revisión.",
+      statusBox
+    );
+
+    createElement(
+      "p",
+      "Los hallazgos son señales técnicas y no demuestran por sí solos el uso de hacks.",
+      statusBox
+    );
   }
 
-  scanResults.appendChild(status);
+  scanResults.appendChild(statusBox);
 
-  const count = document.createElement("p");
+  // ======================================
+  // ARCHIVO PARCIALMENTE ANALIZADO
+  // ======================================
 
-  count.textContent =
-    "Indicadores encontrados: " + result.findings.length;
+  if (result.truncated) {
+    const warning = document.createElement("div");
 
-  scanResults.appendChild(count);
+    warning.style.padding = "12px";
+    warning.style.marginTop = "14px";
+    warning.style.borderRadius = "10px";
+    warning.style.background = "rgba(255,193,92,0.12)";
+    warning.style.border = "1px solid #ffc15c";
 
-  if (result.findings.length > 0) {
-    const findingsTitle = document.createElement("h4");
+    createElement(
+      "strong",
+      "ADVERTENCIA: ANÁLISIS PARCIAL",
+      warning
+    );
 
-    findingsTitle.textContent = "DETALLES";
+    createElement(
+      "p",
+      "Se alcanzó un límite de análisis. Algunos archivos podrían no haberse examinado. No se debe interpretar este informe como un análisis completo.",
+      warning
+    );
 
-    scanResults.appendChild(findingsTitle);
+    scanResults.appendChild(warning);
+  }
 
-    result.findings.forEach((finding, index) => {
-      const item = document.createElement("div");
+  // ======================================
+  // DETALLES DE LOS HALLAZGOS
+  // ======================================
 
-      item.style.padding = "12px";
-      item.style.marginTop = "10px";
-      item.style.borderRadius = "8px";
-      item.style.background = "rgba(255,255,255,0.06)";
+  if (findings.length > 0) {
+    createElement(
+      "h3",
+      "DETALLES Y EVIDENCIAS",
+      scanResults
+    );
 
-      const name = document.createElement("strong");
-
-      name.textContent =
-        (index + 1) + ". " + finding.name;
-
-      const category = document.createElement("p");
-
-      category.textContent =
-        "Categoría: " + finding.category;
-
-      const occurrences = document.createElement("p");
-
-      occurrences.textContent =
-        "Coincidencias: " + finding.occurrences;
-
-      const path = document.createElement("p");
-
-      path.textContent =
-        "Archivo: " + finding.file;
-
-      const confidence = document.createElement("p");
-
-      confidence.textContent =
-        finding.confidence;
-
-      item.append(
-        name,
-        category,
-        occurrences,
-        path,
-        confidence
+    findings.forEach((finding, index) => {
+      scanResults.appendChild(
+        renderFinding(finding, index)
       );
-
-      scanResults.appendChild(item);
     });
+
+  } else {
+    createElement(
+      "p",
+      "No hay hallazgos que mostrar con las reglas actuales.",
+      scanResults
+    );
   }
 
-  const disclaimer = document.createElement("p");
+  // ======================================
+  // ADVERTENCIA FINAL
+  // ======================================
 
-  disclaimer.style.marginTop = "18px";
+  const disclaimer = document.createElement("div");
+
+  disclaimer.style.marginTop = "20px";
+  disclaimer.style.padding = "14px";
+  disclaimer.style.borderRadius = "10px";
+  disclaimer.style.background = "rgba(255,255,255,0.05)";
   disclaimer.style.fontSize = "13px";
-  disclaimer.textContent = result.disclaimer;
+  disclaimer.style.lineHeight = "1.6";
+
+  createElement(
+    "strong",
+    "LIMITACIONES DEL ANALISIS",
+    disclaimer
+  );
+
+  createElement(
+    "p",
+    result.disclaimer ||
+      "Este análisis identifica indicadores técnicos. No confirma por sí solo el uso de hacks ni modificaciones de juegos.",
+    disclaimer
+  );
 
   scanResults.appendChild(disclaimer);
 }
 
 // ========================================
-// INICIAR ANÁLISIS IPHONE
+// INICIAR ANALISIS IPHONE
 // ========================================
 
 async function startScan() {
@@ -380,7 +696,6 @@ async function startScan() {
     isScanning = false;
 
     scanButton.textContent = "ANALIZAR ARCHIVO";
-
     updateScanButton();
   }
 }
@@ -388,7 +703,7 @@ async function startScan() {
 scanButton.addEventListener("click", startScan);
 
 // ========================================
-// INICIAR SESIÓN
+// INICIAR SESION
 // ========================================
 
 loginButton.addEventListener("click", () => {
