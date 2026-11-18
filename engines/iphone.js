@@ -3,15 +3,36 @@
 ========================================
  J-SCANNER
  IPHONE DIAGNOSTIC ENGINE
- Version 1.0
+ Version 1.1
+ STREAMING TAR.GZ SCANNER
 ========================================
 */
 
 (function () {
   "use strict";
 
+  // ======================================
+  // LÍMITES DE SEGURIDAD
+  // ======================================
+
   const MAX_FILE_SIZE = 2 * 1024 * 1024;
-  const MAX_TOTAL_SIZE = 80 * 1024 * 1024;
+
+  const MAX_TOTAL_TEXT_SIZE =
+    80 * 1024 * 1024;
+
+  const MAX_DECOMPRESSED_SIZE =
+    2 * 1024 * 1024 * 1024;
+
+  const MAX_ORIGINAL_SIZE =
+    1024 * 1024 * 1024;
+
+  const MAX_ENTRIES = 50000;
+
+  const MAX_INSPECTED_FILES = 10000;
+
+  // ======================================
+  // INDICADORES
+  // ======================================
 
   const INDICATORS = [
     {
@@ -71,11 +92,17 @@
     ".csv"
   ];
 
+  // ======================================
+  // UTILIDADES
+  // ======================================
+
   function isTextFile(name) {
     const lower = name.toLowerCase();
 
     return (
-      TEXT_EXTENSIONS.some(ext => lower.endsWith(ext)) ||
+      TEXT_EXTENSIONS.some(ext =>
+        lower.endsWith(ext)
+      ) ||
       lower.includes("log") ||
       lower.includes("panic") ||
       lower.includes("crash")
@@ -83,7 +110,9 @@
   }
 
   function cleanPath(path) {
-    return String(path).replace(/\\/g, "/").slice(0, 300);
+    return String(path)
+      .replace(/\\/g, "/")
+      .slice(0, 300);
   }
 
   function analyzeText(text, filePath) {
@@ -109,7 +138,8 @@
           severity: indicator.severity,
           file: cleanPath(filePath),
           occurrences: matches,
-          confidence: "Baja: requiere verificación manual"
+          confidence:
+            "Baja: requiere verificación manual"
         });
       }
     }
@@ -117,17 +147,322 @@
     return findings;
   }
 
-  async function readTextFile(file) {
-    if (file.size > MAX_FILE_SIZE) {
-      return null;
+  // ======================================
+  // LECTOR PROGRESIVO
+  // ======================================
+
+  class StreamReader {
+    constructor(stream, maxBytes) {
+      this.reader = stream.getReader();
+      this.maxBytes = maxBytes;
+
+      this.chunks = [];
+      this.firstOffset = 0;
+      this.available = 0;
+
+      this.totalRead = 0;
+      this.done = false;
     }
 
-    try {
-      return await file.async("string");
-    } catch {
-      return null;
+    async fill(minimum) {
+      while (
+        this.available < minimum &&
+        !this.done
+      ) {
+        const result = await this.reader.read();
+
+        if (result.done) {
+          this.done = true;
+          break;
+        }
+
+        const chunk = result.value;
+
+        this.totalRead += chunk.byteLength;
+
+        if (this.totalRead > this.maxBytes) {
+          throw new Error(
+            "El archivo descomprimido supera el límite de seguridad de 2 GB."
+          );
+        }
+
+        this.chunks.push(chunk);
+        this.available += chunk.byteLength;
+      }
+    }
+
+    consume(length, destination, destinationOffset) {
+      let remaining = length;
+      let written = 0;
+
+      while (remaining > 0) {
+        const chunk = this.chunks[0];
+
+        const availableInChunk =
+          chunk.byteLength - this.firstOffset;
+
+        const amount = Math.min(
+          remaining,
+          availableInChunk
+        );
+
+        if (destination) {
+          destination.set(
+            chunk.subarray(
+              this.firstOffset,
+              this.firstOffset + amount
+            ),
+            destinationOffset + written
+          );
+        }
+
+        this.firstOffset += amount;
+        this.available -= amount;
+
+        remaining -= amount;
+        written += amount;
+
+        if (
+          this.firstOffset >= chunk.byteLength
+        ) {
+          this.chunks.shift();
+          this.firstOffset = 0;
+        }
+      }
+    }
+
+    async readExact(length) {
+      if (length === 0) {
+        return new Uint8Array(0);
+      }
+
+      await this.fill(length);
+
+      if (this.available < length) {
+        if (this.available === 0) {
+          return null;
+        }
+
+        throw new Error(
+          "El archivo TAR está incompleto o dañado."
+        );
+      }
+
+      const output = new Uint8Array(length);
+
+      this.consume(length, output, 0);
+
+      return output;
+    }
+
+    async skip(length) {
+      let remaining = length;
+
+      while (remaining > 0) {
+        if (this.available === 0) {
+          await this.fill(1);
+        }
+
+        if (this.available === 0) {
+          throw new Error(
+            "El archivo TAR terminó antes de tiempo."
+          );
+        }
+
+        const amount = Math.min(
+          remaining,
+          this.available
+        );
+
+        this.consume(amount, null, 0);
+
+        remaining -= amount;
+      }
+    }
+
+    async cancel() {
+      try {
+        await this.reader.cancel();
+      } catch {
+        // El flujo puede estar cerrado.
+      }
     }
   }
+
+  // ======================================
+  // LECTURA DE TAMAÑO TAR
+  // ======================================
+
+  function parseTarSize(bytes) {
+    // Formato base-256 de TAR
+
+    if (bytes[0] & 0x80) {
+      let value = 0;
+
+      for (let i = 0; i < bytes.length; i++) {
+        const byte =
+          i === 0
+            ? bytes[i] & 0x7f
+            : bytes[i];
+
+        value = value * 256 + byte;
+
+        if (!Number.isSafeInteger(value)) {
+          throw new Error(
+            "Tamaño TAR no compatible."
+          );
+        }
+      }
+
+      return value;
+    }
+
+    const text = new TextDecoder()
+      .decode(bytes)
+      .replace(/\0.*$/, "")
+      .trim();
+
+    if (!text) return 0;
+
+    const value = parseInt(text, 8);
+
+    if (
+      !Number.isSafeInteger(value) ||
+      value < 0
+    ) {
+      throw new Error(
+        "El archivo TAR contiene un tamaño inválido."
+      );
+    }
+
+    return value;
+  }
+
+  // ======================================
+  // ANALIZAR TAR PROGRESIVAMENTE
+  // ======================================
+
+  async function analyzeTarStream(stream) {
+    const source = new StreamReader(
+      stream,
+      MAX_DECOMPRESSED_SIZE
+    );
+
+    const findings = [];
+    const inspected = [];
+
+    let totalTextSize = 0;
+    let entries = 0;
+    let truncated = false;
+
+    try {
+      while (entries < MAX_ENTRIES) {
+        const header = await source.readExact(512);
+
+        if (!header) break;
+
+        if (header.every(byte => byte === 0)) {
+          break;
+        }
+
+        entries++;
+
+        const decoder = new TextDecoder();
+
+        const name = decoder.decode(
+          header.subarray(0, 100)
+        ).replace(/\0.*$/, "");
+
+        const prefix = decoder.decode(
+          header.subarray(345, 500)
+        ).replace(/\0.*$/, "");
+
+        const path = prefix
+          ? prefix + "/" + name
+          : name;
+
+        const size = parseTarSize(
+          header.subarray(124, 136)
+        );
+
+        const type = String.fromCharCode(
+          header[156] || 0
+        );
+
+        const regularFile =
+          type === "\0" ||
+          type === "0";
+
+        const padding =
+          (512 - (size % 512)) % 512;
+
+        const canInspect =
+          regularFile &&
+          isTextFile(path) &&
+          size <= MAX_FILE_SIZE &&
+          totalTextSize + size <=
+            MAX_TOTAL_TEXT_SIZE &&
+          inspected.length <
+            MAX_INSPECTED_FILES;
+
+        if (canInspect) {
+          const data = await source.readExact(size);
+
+          if (!data) {
+            throw new Error(
+              "No se pudo leer un archivo interno del TAR."
+            );
+          }
+
+          totalTextSize += data.byteLength;
+
+          const text = new TextDecoder(
+            "utf-8",
+            { fatal: false }
+          ).decode(data);
+
+          inspected.push(cleanPath(path));
+
+          findings.push(
+            ...analyzeText(text, path)
+          );
+
+        } else {
+          await source.skip(size);
+        }
+
+        if (padding > 0) {
+          await source.skip(padding);
+        }
+
+        if (
+          inspected.length >= MAX_INSPECTED_FILES
+        ) {
+          truncated = true;
+          break;
+        }
+      }
+
+      if (entries >= MAX_ENTRIES) {
+        truncated = true;
+      }
+
+      return {
+        inspected,
+        findings,
+        totalSize: totalTextSize,
+        entries,
+        truncated
+      };
+
+    } finally {
+      await source.cancel();
+    }
+  }
+
+  // ======================================
+  // ANALIZAR ZIP
+  // ======================================
 
   async function analyzeZip(file) {
     if (!window.JSZip) {
@@ -136,35 +471,46 @@
       );
     }
 
-    const archive = await window.JSZip.loadAsync(file);
+    const archive =
+      await window.JSZip.loadAsync(file);
 
     const findings = [];
     const inspected = [];
 
     let totalSize = 0;
 
-    for (const [path, entry] of Object.entries(archive.files)) {
+    for (const [path, entry] of
+      Object.entries(archive.files)) {
+
       if (entry.dir || !isTextFile(path)) {
         continue;
       }
 
-      if (inspected.length >= 5000) {
+      if (
+        inspected.length >= MAX_INSPECTED_FILES
+      ) {
         break;
       }
 
-      if (entry._data && entry._data.uncompressedSize > MAX_FILE_SIZE) {
+      if (
+        entry._data &&
+        entry._data.uncompressedSize >
+          MAX_FILE_SIZE
+      ) {
         continue;
       }
 
-      const text = await readTextFile(entry);
+      const text = await entry.async("string");
 
-      if (text === null) {
+      const size = new Blob([text]).size;
+
+      if (size > MAX_FILE_SIZE) {
         continue;
       }
 
-      totalSize += new Blob([text]).size;
+      totalSize += size;
 
-      if (totalSize > MAX_TOTAL_SIZE) {
+      if (totalSize > MAX_TOTAL_TEXT_SIZE) {
         break;
       }
 
@@ -178,65 +524,22 @@
     return {
       inspected,
       findings,
-      totalSize
+      totalSize,
+      entries: inspected.length,
+      truncated: false
     };
   }
 
-  function parseTar(buffer) {
-    const bytes = new Uint8Array(buffer);
-    const files = [];
+  // ======================================
+  // DESCOMPRESIÓN GZIP EN FLUJO
+  // ======================================
 
-    let offset = 0;
-
-    while (offset + 512 <= bytes.length) {
-      const header = bytes.subarray(offset, offset + 512);
-
-      if (header.every(byte => byte === 0)) {
-        break;
-      }
-
-      const name = new TextDecoder().decode(
-        header.subarray(0, 100)
-      ).replace(/\0.*$/, "");
-
-      const sizeText = new TextDecoder().decode(
-        header.subarray(124, 136)
-      ).replace(/\0.*$/, "").trim();
-
-      const size = parseInt(sizeText || "0", 8);
-
-      if (!Number.isFinite(size) || size < 0) {
-        break;
-      }
-
-      const dataStart = offset + 512;
-      const dataEnd = dataStart + size;
-
-      if (dataEnd > bytes.length) {
-        break;
-      }
-
-      if (name && size <= MAX_FILE_SIZE) {
-        files.push({
-          name,
-          data: bytes.subarray(dataStart, dataEnd)
-        });
-      }
-
-      offset = dataStart + Math.ceil(size / 512) * 512;
-
-      if (files.length >= 5000) {
-        break;
-      }
-    }
-
-    return files;
-  }
-
-  async function decompressGzip(file) {
-    if (typeof DecompressionStream === "undefined") {
+  async function analyzeGzip(file) {
+    if (
+      typeof DecompressionStream === "undefined"
+    ) {
       throw new Error(
-        "Este navegador no permite descomprimir GZIP."
+        "Este navegador no permite descomprimir GZIP. Actualiza Safari o utiliza otro navegador compatible."
       );
     }
 
@@ -244,55 +547,21 @@
       new DecompressionStream("gzip")
     );
 
-    return await new Response(stream).arrayBuffer();
+    return await analyzeTarStream(stream);
   }
 
-  function analyzeTar(buffer) {
-    const files = parseTar(buffer);
-
-    const findings = [];
-    const inspected = [];
-
-    let totalSize = 0;
-
-    for (const item of files) {
-      if (!isTextFile(item.name)) {
-        continue;
-      }
-
-      totalSize += item.data.byteLength;
-
-      if (totalSize > MAX_TOTAL_SIZE) {
-        break;
-      }
-
-      const text = new TextDecoder(
-        "utf-8",
-        { fatal: false }
-      ).decode(item.data);
-
-      inspected.push(item.name);
-
-      findings.push(
-        ...analyzeText(text, item.name)
-      );
-    }
-
-    return {
-      inspected,
-      findings,
-      totalSize
-    };
-  }
+  // ======================================
+  // FUNCIÓN PRINCIPAL
+  // ======================================
 
   async function scan(file) {
     if (!(file instanceof File)) {
       throw new Error("Archivo inválido.");
     }
 
-    if (file.size > 1024 * 1024 * 1024) {
+    if (file.size > MAX_ORIGINAL_SIZE) {
       throw new Error(
-        "El archivo supera el límite de 1 GB."
+        "El archivo original supera el límite de 1 GB."
       );
     }
 
@@ -308,15 +577,7 @@
       name.endsWith(".tgz") ||
       name.endsWith(".gz")
     ) {
-      const buffer = await decompressGzip(file);
-
-      if (buffer.byteLength > MAX_TOTAL_SIZE * 4) {
-        throw new Error(
-          "El archivo descomprimido supera el límite de seguridad."
-        );
-      }
-
-      result = analyzeTar(buffer);
+      result = await analyzeGzip(file);
 
     } else {
       throw new Error(
@@ -326,29 +587,42 @@
 
     const categories = [
       ...new Set(
-        result.findings.map(item => item.category)
+        result.findings.map(
+          item => item.category
+        )
       )
     ];
 
     return {
       engine: "J-SCANNER IPHONE",
-      version: "1.0",
+      version: "1.1",
+
       fileName: file.name,
       fileSize: file.size,
+
       scannedFiles: result.inspected.length,
       findings: result.findings,
       categories,
+
+      entriesProcessed: result.entries,
+      truncated: result.truncated,
+
       status: result.findings.length
         ? "REVIEW_REQUIRED"
         : "NO_INDICATORS_FOUND",
+
       disclaimer:
-        "La ausencia de indicadores no demuestra que el dispositivo esté libre de hacks. Las coincidencias requieren verificación manual."
+        "La ausencia de indicadores no demuestra que el dispositivo esté libre de hacks. Las coincidencias son indicios y requieren verificación manual. El análisis puede no incluir todos los archivos del diagnóstico."
     };
   }
 
+  // ======================================
+  // EXPORTAR MOTOR
+  // ======================================
+
   window.JScannerIPhone = {
     scan,
-    version: "1.0"
+    version: "1.1"
   };
 
 })();
