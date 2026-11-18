@@ -1,0 +1,261 @@
+
+
+<!DOCTYPE html>
+
+<html lang="es">
+
+<head>
+
+  <meta charset="UTF-8">
+
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <meta name="theme-color" content="#080d16">
+
+  <meta name="description" content="J-Scanner - Game Security Scanner">
+
+  <title>J-Scanner | Game Security</title>
+
+  <link rel="stylesheet" href="style.css">
+
+</head>
+
+<body>
+
+  <header class="header">
+
+    <a href="#" class="brand">
+
+      <span class="brand-icon">J</span>
+
+      <span>J-SCANNER</span>
+
+    </a>
+
+    <nav>
+
+      <a href="#scanner">Scanner</a>
+
+      <a href="#premium">Premium</a>
+
+      <a href="#about">Información</a>
+
+    </nav>
+
+    <button class="login-btn" id="loginButton">
+
+      Iniciar sesión
+
+    </button>
+
+  </header>
+
+  <main>
+
+    <section class="hero">
+
+      <div class="status">
+
+        <span class="status-dot"></span>
+
+        GAME SECURITY SYSTEM
+
+      </div>
+
+      <h1>
+
+        J-SCANNER
+
+        <span>ADVANCED GAME SECURITY</span>
+
+      </h1>
+
+      <p>
+
+        Analiza archivos, identifica modificaciones
+
+        sospechosas y examina evidencias relacionadas
+
+        con la seguridad de tus juegos.
+
+      </p>
+
+      <a href="#scanner" class="main-btn">
+
+        ABRIR SCANNER
+
+      </a>
+
+    </section>
+
+    <section class="scanner-section" id="scanner">
+
+      <div class="section-heading">
+
+        <span>DIAGNOSTIC SYSTEM</span>
+
+        <h2>Selecciona tu dispositivo</h2>
+
+        <p>Elige el sistema que deseas analizar.</p>
+
+      </div>
+
+      <div class="device-grid">
+
+        <button class="device-card active"
+
+                data-device="iphone">
+
+          <span class="device-icon"></span>
+
+          <h3>iPhone</h3>
+
+          <p>Sysdiagnose Scanner</p>
+
+          <span class="device-status">WEB SCANNER</span>
+
+        </button>
+
+        <button class="device-card"
+
+                data-device="android">
+
+          <span class="device-icon">◈</span>
+
+          <h3>Android</h3>
+
+          <p>Game File Scanner</p>
+
+          <span class="device-status">ANDROID APP</span>
+
+        </button>
+
+      </div>
+
+      <div class="upload-panel">
+
+        <div class="upload-icon">⇧</div>
+
+        <h3 id="uploadTitle">
+
+          Cargar Sysdiagnose
+
+        </h3>
+
+        <p id="uploadDescription">
+
+          Selecciona el archivo de diagnóstico
+
+          de tu iPhone.
+
+        </p>
+
+        <input type="file" id="fileInput" hidden>
+
+        <button class="upload-btn" id="uploadButton">
+
+          SELECCIONAR ARCHIVO
+
+        </button>
+
+        <p class="file-name" id="fileName">
+
+          Ningún archivo seleccionado
+
+        </p>
+
+        <p class="privacy">
+
+          🔒 Los archivos se procesarán localmente
+
+          cuando el motor de análisis esté habilitado.
+
+        </p>
+
+      </div>
+
+      <div class="results-panel">
+
+        <h3>Resultados del análisis</h3>
+
+        <p id="scanStatus">
+
+          Esperando un archivo.
+
+        </p>
+
+        <div id="scanResults"></div>
+
+      </div>
+
+    </section>
+
+    <section class="premium-section" id="premium">
+
+      <span>J-SCANNER PREMIUM</span>
+
+      <h2>Desbloquea todo el potencial</h2>
+
+      <p>
+
+        Accede al análisis completo y a las
+
+        herramientas avanzadas de seguridad.
+
+      </p>
+
+      <div class="premium-features">
+
+        <p>✓ Análisis avanzado</p>
+
+        <p>✓ Historial de escaneos</p>
+
+        <p>✓ Informes detallados</p>
+
+        <p>✓ Herramientas Premium</p>
+
+      </div>
+
+      <button class="premium-btn" id="premiumButton">
+
+        DESCUBRIR PREMIUM
+
+      </button>
+
+    </section>
+
+    <section class="about-section" id="about">
+
+      <h2>Acerca de J-Scanner</h2>
+
+      <p>
+
+        Plataforma de análisis de seguridad enfocada
+
+        en detectar evidencias de archivos externos,
+
+        modificaciones y herramientas sospechosas
+
+        relacionadas con videojuegos.
+
+      </p>
+
+    </section>
+
+  </main>
+
+  <footer>
+
+    <strong>J-SCANNER</strong>
+
+    <p>GAME SECURITY SYSTEM</p>
+
+    <small>© 2026 J-Scanner. Todos los derechos reservados.</small>
+
+  </footer>
+
+  <script src="app.js"></script>
+
+</body>
+
+</html>
