@@ -3,8 +3,8 @@
 ========================================
  J-SCANNER
  IPHONE DIAGNOSTIC ENGINE
- VERSION 1.3
- BINARY FILTER + FALSE POSITIVE CONTROL
+ VERSION 1.4
+ FREE FIRE INDICATOR DETECTION
 ========================================
 */
 
@@ -20,20 +20,9 @@
   const MAX_EVIDENCE_PER_RULE = 4;
 
   const TEXT_EXTENSIONS = [
-    ".txt",
-    ".log",
-    ".plist",
-    ".json",
-    ".xml",
-    ".ips",
-    ".crash",
-    ".panic",
-    ".csv"
+    ".txt", ".log", ".plist", ".json", ".xml",
+    ".ips", ".crash", ".panic", ".csv"
   ];
-
-  // ======================================
-  // RUTAS LEGITIMAS QUE NO SON INDICADORES
-  // ======================================
 
   const SAFE_PATHS = [
     "/System/Library/PreferenceBundles/",
@@ -51,23 +40,184 @@
   // ======================================
 
   const RULES = [
+
+    // INSTALADORES IPA
+
+    {
+      id: "esign_reference",
+      name: "Referencia a ESign",
+      category: "Instaladores IPA",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a ESign. Puede corresponder a una aplicación instalada, un registro histórico o una mención. No confirma su uso.",
+      validate: line => /\besign\b/i.test(line)
+    },
+
+    {
+      id: "gbox_reference",
+      name: "Referencia a GBox",
+      category: "Instaladores IPA",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a GBox. Debe verificarse el contexto y la aplicación relacionada.",
+      validate: line => /\bgbox\b/i.test(line)
+    },
+
+    {
+      id: "ksign_reference",
+      name: "Referencia a KSign",
+      category: "Instaladores IPA",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a KSign. No demuestra por sí sola que se haya instalado o utilizado.",
+      validate: line => /\bksign\b/i.test(line)
+    },
+
+    {
+      id: "trollstore_reference",
+      name: "Referencia a TrollStore",
+      category: "Instaladores IPA",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a TrollStore. Se necesita confirmar su origen y contexto.",
+      validate: line => /\btroll\s*store\b/i.test(line)
+    },
+
+    {
+      id: "trollfools_reference",
+      name: "Referencia a TrollFools",
+      category: "Instaladores IPA",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a TrollFools. No confirma que la herramienta esté activa.",
+      validate: line => /\btroll\s*fools\b/i.test(line)
+    },
+
+    {
+      id: "fluckstore_reference",
+      name: "Referencia a FlucksStore",
+      category: "Instaladores IPA",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a FlucksStore. Debe revisarse el registro original.",
+      validate: line => /\bflucks?\s*store\b/i.test(line)
+    },
+
+    // HERRAMIENTAS EXTERNAS
+
+    {
+      id: "filza_reference",
+      name: "Referencia a Filza",
+      category: "Herramientas externas",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a Filza. Puede tratarse de una aplicación, una ruta o una mención histórica.",
+      validate: line => /\bfilza(?:escaped)?\b/i.test(line)
+    },
+
+    {
+      id: "flourite_reference",
+      name: "Referencia a Flourite",
+      category: "Herramientas externas",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a Flourite. Es necesario verificar el contexto para determinar su relación con el dispositivo.",
+      validate: line => /\bflourite\b/i.test(line)
+    },
+
+    {
+      id: "freefire_panel",
+      name: "Referencia a panel de Free Fire",
+      category: "Modificaciones de juego",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia que combina Free Fire con términos relacionados con paneles o modificaciones. No confirma que el panel haya sido ejecutado.",
+      validate: line => /\b(?:free\s*fire|freefire|ff)\b/i.test(line) &&
+        /\b(?:panel|mod menu|modmenu|hack|cheat)\b/i.test(line)
+    },
+
+    // JAILBREAK
+
+    {
+      id: "jailbreak_paths",
+      name: "Ruta asociada a jailbreak",
+      category: "Jailbreak",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una ruta asociada a herramientas de modificación de iOS. Debe verificarse su existencia y actividad.",
+      validate: line => /\/(?:Applications\/(?:Cydia|Sileo|Zebra)\.app|Library\/MobileSubstrate(?:\/|$)|Library\/TweakInject(?:\/|$)|usr\/lib\/TweakInject(?:\/|$)|var\/jb(?:\/|$)|var\/containers\/Bundle\/tweaksupport(?:\/|$))/i.test(line)
+    },
+
+    {
+      id: "jailbreak_tool",
+      name: "Referencia a herramienta de jailbreak",
+      category: "Jailbreak",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a una herramienta o componente relacionado con jailbreak. Una mención no demuestra que el dispositivo esté modificado.",
+      validate: line => /\b(?:Cydia|Sileo|Zebra|Substrate|Substitute|ElleKit|libhooker|Dopamine|Palera1n|Checkra1n)\b/i.test(line)
+    },
+
+    // PROXY
+
+    {
+      id: "proxy_configuration",
+      name: "Referencia a configuración Proxy",
+      category: "Red",
+      severity: "medium",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a una configuración Proxy o a un servidor intermediario. Los proxies también pueden utilizarse legítimamente.",
+      validate: line => /\b(?:HTTPEnable|HTTPProxy|HTTPPort|HTTPSProxy|HTTPSPort|ProxyServer|ProxyPort|ProxyAutoConfigURL|ProxyPACURL|proxy server|proxy configuration)\b/i.test(line)
+    },
+
+    {
+      id: "proxy_address",
+      name: "Referencia a dirección de Proxy",
+      category: "Red",
+      severity: "low",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una dirección o configuración que podría estar relacionada con un Proxy. Debe comprobarse su función.",
+      validate: line => /\b(?:proxy|pac)\b/i.test(line) &&
+        /(?:https?:\/\/|(?:\d{1,3}\.){3}\d{1,3}|localhost|127\.0\.0\.1)/i.test(line)
+    },
+
+    // DNS
+
+    {
+      id: "dns_configuration",
+      name: "Referencia a configuración DNS",
+      category: "Red",
+      severity: "low",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a configuración DNS. El uso de DNS personalizado no demuestra manipulación ni uso de hacks.",
+      validate: line => /\b(?:DNSConfiguration|DNSSettings|DNSServer|DNSResolver|nameserver|dns server|resolver address|PrivateDNS)\b/i.test(line)
+    },
+
+    {
+      id: "custom_dns_address",
+      name: "Posible dirección DNS personalizada",
+      category: "Red",
+      severity: "low",
+      confidence: "Indicador contextual",
+      explanation: "Se encontró una referencia a una dirección DNS. Se necesita determinar si es una configuración activa o una referencia histórica.",
+      validate: line => /\bDNS\b/i.test(line) &&
+        /(?:\d{1,3}\.){3}\d{1,3}/i.test(line)
+    },
+
+    // INSTRUMENTACION
+
     {
       id: "frida_artifact",
       name: "Artefacto específico de Frida",
       category: "Instrumentación",
       severity: "high",
       confidence: "Indicador fuerte",
-
-      explanation:
-        "Se encontró una referencia específica a un componente de Frida. Debe verificarse si corresponde a una herramienta activa, un registro histórico o una referencia de diagnóstico.",
-
-      validate: function (line) {
-        return /\bfrida-(?:server|gadget|agent)\b/i.test(line) ||
-          (
-            /\bfrida\b/i.test(line) &&
-            /\b(?:27042|27043|gadget|server|agent|attach|spawn)\b/i.test(line)
-          );
-      }
+      explanation: "Se encontró una referencia específica a un componente de Frida. Debe verificarse si corresponde a una herramienta activa o a un registro histórico.",
+      validate: line => /\bfrida-(?:server|gadget|agent)\b/i.test(line) ||
+        (
+          /\bfrida\b/i.test(line) &&
+          /\b(?:27042|27043|gadget|server|agent|attach|spawn)\b/i.test(line)
+        )
     },
 
     {
@@ -76,28 +226,8 @@
       category: "Carga de bibliotecas",
       severity: "high",
       confidence: "Indicador fuerte",
-
-      explanation:
-        "Se encontró una asignación de DYLD_INSERT_LIBRARIES con una ruta. La presencia de esta variable no demuestra por sí sola que una biblioteca haya sido cargada.",
-
-      validate: function (line) {
-        return /DYLD_INSERT_LIBRARIES\s*=\s*["']?\/[^;\s"']+/i.test(line);
-      }
-    },
-
-    {
-      id: "jailbreak_paths",
-      name: "Ruta asociada a jailbreak",
-      category: "Sistema",
-      severity: "medium",
-      confidence: "Indicador contextual",
-
-      explanation:
-        "Se encontró una ruta específica habitualmente asociada a herramientas de modificación de iOS. Debe verificarse su existencia, actividad y relación con el proceso.",
-
-      validate: function (line) {
-        return /\/(?:Applications\/(?:Cydia|Sileo|Zebra)\.app|Library\/MobileSubstrate(?:\/|$)|Library\/TweakInject(?:\/|$)|usr\/lib\/TweakInject(?:\/|$)|var\/jb(?:\/|$)|var\/containers\/Bundle\/tweaksupport(?:\/|$))/i.test(line);
-      }
+      explanation: "Se encontró una asignación de DYLD_INSERT_LIBRARIES con una ruta. No demuestra por sí sola que una biblioteca haya sido cargada.",
+      validate: line => /DYLD_INSERT_LIBRARIES\s*=\s*["']?\/[^;\s"']+/i.test(line)
     },
 
     {
@@ -106,14 +236,9 @@
       category: "Bibliotecas",
       severity: "medium",
       confidence: "Indicador contextual",
-
-      explanation:
-        "Se encontró una referencia a un framework relacionado con instrumentación o modificación de procesos, acompañada de un contexto de carga.",
-
-      validate: function (line) {
-        return /\b(?:MobileSubstrate|Substitute|ElleKit|libhooker)\b/i.test(line) &&
-          /\b(?:loaded|loading|injected|injection|dylib|mapped|process)\b/i.test(line);
-      }
+      explanation: "Se encontró una referencia a un framework relacionado con instrumentación o modificación de procesos.",
+      validate: line => /\b(?:MobileSubstrate|Substitute|ElleKit|libhooker)\b/i.test(line) &&
+        /\b(?:loaded|loading|injected|injection|dylib|mapped|process)\b/i.test(line)
     },
 
     {
@@ -122,14 +247,9 @@
       category: "Integridad",
       severity: "medium",
       confidence: "Indicador contextual",
-
-      explanation:
-        "Se encontró un error relacionado con la validación de una firma de código. También puede deberse a errores legítimos de instalación, desarrollo o actualización.",
-
-      validate: function (line) {
-        return /(?:code signature invalid|invalid code signature|signature validation failed)/i.test(line) &&
-          /\b(?:amfi|codesign|executable|process|bundle|application)\b/i.test(line);
-      }
+      explanation: "Se encontró un error relacionado con la validación de una firma de código. También puede deberse a errores legítimos.",
+      validate: line => /(?:code signature invalid|invalid code signature|signature validation failed)/i.test(line) &&
+        /\b(?:amfi|codesign|executable|process|bundle|application)\b/i.test(line)
     }
   ];
 
@@ -156,31 +276,27 @@
   function isSafePath(path) {
     const normalized = "/" + cleanPath(path).replace(/^\/+/, "");
 
-    return SAFE_PATHS.some(function (safePath) {
-      return normalized.startsWith(safePath);
-    });
+    return SAFE_PATHS.some(safePath =>
+      normalized.startsWith(safePath)
+    );
   }
 
   function hasTextExtension(path) {
     const name = cleanPath(path).toLowerCase();
     const basename = name.split("/").pop();
 
-    return TEXT_EXTENSIONS.some(function (extension) {
-      return basename.endsWith(extension);
-    });
+    return TEXT_EXTENSIONS.some(extension =>
+      basename.endsWith(extension)
+    );
   }
 
   // ======================================
-  // FILTRO DE CONTENIDO BINARIO
+  // FILTRO BINARIO
   // ======================================
 
   function isProbablyText(bytes) {
-    if (!bytes || bytes.length === 0) {
-      return false;
-    }
+    if (!bytes || bytes.length === 0) return false;
 
-    // Los archivos binarios de Apple pueden comenzar
-    // con bplist00 aunque su extensión sea .plist.
     if (
       bytes.length >= 8 &&
       bytes[0] === 0x62 &&
@@ -194,14 +310,12 @@
     }
 
     let printable = 0;
-    let inspected = Math.min(bytes.length, 8192);
+    const inspected = Math.min(bytes.length, 8192);
 
     for (let i = 0; i < inspected; i++) {
       const value = bytes[i];
 
-      if (value === 0) {
-        return false;
-      }
+      if (value === 0) return false;
 
       if (
         value === 9 ||
@@ -225,9 +339,7 @@
     const findings = [];
     const lines = String(text).split(/\r?\n/);
 
-    if (isSafePath(filePath)) {
-      return findings;
-    }
+    if (isSafePath(filePath)) return findings;
 
     for (const rule of RULES) {
       const evidence = [];
@@ -236,15 +348,11 @@
       for (let i = 0; i < lines.length; i++) {
         const originalLine = lines[i];
 
-        if (!rule.validate(originalLine)) {
-          continue;
-        }
+        if (!rule.validate(originalLine)) continue;
 
         const excerpt = cleanEvidence(originalLine);
 
-        if (!excerpt || seen.has(excerpt)) {
-          continue;
-        }
+        if (!excerpt || seen.has(excerpt)) continue;
 
         seen.add(excerpt);
 
@@ -253,9 +361,7 @@
           text: excerpt
         });
 
-        if (evidence.length >= MAX_EVIDENCE_PER_RULE) {
-          break;
-        }
+        if (evidence.length >= MAX_EVIDENCE_PER_RULE) break;
       }
 
       if (evidence.length > 0) {
@@ -351,16 +457,12 @@
     }
 
     async readExact(length) {
-      if (length === 0) {
-        return new Uint8Array(0);
-      }
+      if (length === 0) return new Uint8Array(0);
 
       await this.fill(length);
 
       if (this.available < length) {
-        if (this.available === 0) {
-          return null;
-        }
+        if (this.available === 0) return null;
 
         throw new Error(
           "El archivo TAR está incompleto o dañado."
@@ -407,7 +509,7 @@
   }
 
   // ======================================
-  // LECTOR DE TAMAÑO TAR
+  // LECTOR TAR
   // ======================================
 
   function parseTarSize(bytes) {
@@ -470,9 +572,7 @@
 
         if (!header) break;
 
-        if (header.every(byte => byte === 0)) {
-          break;
-        }
+        if (header.every(byte => byte === 0)) break;
 
         entries++;
 
@@ -555,9 +655,7 @@
             truncated = true;
           }
 
-          if (!eligible) {
-            skippedUnsupported++;
-          }
+          if (!eligible) skippedUnsupported++;
 
           await source.skip(size);
         }
@@ -737,6 +835,10 @@
       item => item.severity === "medium"
     ).length;
 
+    const lowCount = result.findings.filter(
+      item => item.severity === "low"
+    ).length;
+
     const categories = [
       ...new Set(
         result.findings.map(item => item.category)
@@ -745,7 +847,7 @@
 
     return {
       engine: "J-SCANNER IPHONE",
-      version: "1.3",
+      version: "1.4",
 
       fileName: file.name,
       fileSize: file.size,
@@ -756,6 +858,7 @@
 
       highRiskCount: highCount,
       mediumRiskCount: mediumCount,
+      lowRiskCount: lowCount,
 
       entriesProcessed: result.entries,
       skippedBinary: result.skippedBinary,
@@ -768,7 +871,7 @@
         : "NO_INDICATORS_FOUND",
 
       disclaimer:
-        "J-Scanner 1.3 filtra archivos binarios y rutas conocidas del sistema iOS. Los indicadores son referencias técnicas que requieren revisión manual. No demuestran por sí solos el uso de hacks ni modificaciones de Free Fire. El análisis no accede a los datos privados del juego ni verifica directamente su integridad. Puede haber falsos positivos y falsos negativos."
+        "J-Scanner 1.4 busca referencias textuales relacionadas con instaladores IPA, herramientas externas, jailbreak, modificaciones de Free Fire, Proxy y DNS. Los indicadores requieren revisión manual y no demuestran por sí solos que una aplicación esté instalada o que se haya utilizado un hack. Los archivos binarios no se interpretan en esta versión. El análisis no accede a los datos privados de Free Fire ni verifica directamente su integridad. Puede haber falsos positivos y falsos negativos."
     };
   }
 
@@ -778,7 +881,7 @@
 
   window.JScannerIPhone = {
     scan: scan,
-    version: "1.3"
+    version: "1.4"
   };
 
 })();
